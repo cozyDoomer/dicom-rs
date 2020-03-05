@@ -27,8 +27,15 @@ pub fn parse_date(buf: &[u8]) -> Result<(NaiveDate, &[u8])> {
             let year = read_number(&buf[0..4])?;
             let month = (i32::from(buf[4]) - Z) * 10 + i32::from(buf[5]) - Z;
             let day = (i32::from(buf[6]) - Z) * 10 + i32::from(buf[7]) - Z;
-            let date: Result<_> = NaiveDate::from_ymd_opt(year, month as u32, day as u32)
-                .ok_or_else(|| InvalidValueReadError::DateTimeZone.into());
+            let date: Result<_>;
+            // workaround for '00000000' dates
+            if year == 0 && month == 0 && day == 0{
+                date = NaiveDate::from_ymd_opt(1, 1, 1)
+                    .ok_or_else(|| InvalidValueReadError::DateTimeZone.into());
+            } else {
+                date = NaiveDate::from_ymd_opt(year, month as u32, day as u32)
+                    .ok_or_else(|| InvalidValueReadError::DateTimeZone.into());
+            }
             Ok((date?, &buf[8..]))
         }
     }
@@ -253,6 +260,10 @@ mod tests {
     #[test]
     fn test_parse_date() {
         assert_eq!(
+            parse_date(&[b'0'; 8]).unwrap(),
+            (NaiveDate::from_ymd(1, 1, 1), &[][..])
+        );
+        assert_eq!(
             parse_date(b"20180101").unwrap(),
             (NaiveDate::from_ymd(2018, 1, 1), &[][..])
         );
@@ -285,7 +296,6 @@ mod tests {
         assert!(parse_date(b"--------").is_err());
         assert!(parse_date(&[0x00_u8; 8]).is_err());
         assert!(parse_date(&[0xFF_u8; 8]).is_err());
-        assert!(parse_date(&[b'0'; 8]).is_err());
         assert!(parse_date(b"19991313").is_err());
         assert!(parse_date(b"20180229").is_err());
         assert!(parse_date(b"nothing!").is_err());
@@ -382,6 +392,10 @@ mod tests {
     fn test_datetime() {
         let default_offset = FixedOffset::east(0);
         assert_eq!(
+            parse_datetime(&[b'0'; 8], default_offset).unwrap(),
+            FixedOffset::east(0).ymd(1, 1, 1).and_hms(0, 0, 0)
+        );
+        assert_eq!(
             parse_datetime(b"201801010930", default_offset).unwrap(),
             FixedOffset::east(0).ymd(2018, 1, 1).and_hms(9, 30, 0)
         );
@@ -438,7 +452,6 @@ mod tests {
         assert!(parse_datetime(b"", default_offset).is_err());
         assert!(parse_datetime(&[0x00_u8; 8], default_offset).is_err());
         assert!(parse_datetime(&[0xFF_u8; 8], default_offset).is_err());
-        assert!(parse_datetime(&[b'0'; 8], default_offset).is_err());
         assert!(parse_datetime(&[b' '; 8], default_offset).is_err());
         assert!(parse_datetime(b"nope", default_offset).is_err());
         assert!(parse_datetime(b"2015dec", default_offset).is_err());
